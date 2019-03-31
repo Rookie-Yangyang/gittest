@@ -8,7 +8,7 @@
 #include <pthread.h>
 #include <getopt.h>
 #include <libgen.h>
-#include <sys/types.h> 
+#include <sys/types.h>
 #include <sys/socket.h>
 #include <arpa/inet.h>
 #include <netinet/in.h>
@@ -27,13 +27,27 @@ void print_help(char *progname)
 	printf("-h(--help):print help information\n");
 }
 
+/* Set open file description count to max */
+void set_socket_rlimit(void)
+{
+	struct rlimit limit={0};
+
+	getrlimit(RLIMIT_NOFILE,&limit);
+	limit.rlim_cur=limit.rlim_max;
+	setrlimit(RLIMIT_NOFILE,&limit);
+
+	printf("set socket open fd max count to %ld\n", limit.rlim_max);
+}
+
+
+
 /*define scoket init()*/
 int socket_server_init(char *listen_ip,int listen_port)
 {
 	int                     sockfd=-1;
 	int                     on=1;
-	
-	
+
+
 
 	struct sockaddr_in       servaddr;
 	struct sockaddr_in       cliaddr;
@@ -61,29 +75,12 @@ int socket_server_init(char *listen_ip,int listen_port)
 
 	listen(sockfd,64);
 
-	close(sockfd);
 
-	return 0;
+	return sockfd;
 }
-
-/* Set open file description count to max */
-void set_socket_rlimit(void)
-{
-	struct rlimit limit={0};
-
-	getrlimit(RLIMIT_NOFILE,&limit);
-	limit.rlim_cur=limit.rlim_max;
-	setrlimit(RLIMIT_NOFILE,&limit);
-
-	printf("set socket open fd max count to %ld\n", limit.rlim_max);
-}
-
-
-
-
 
 int main(int argc,char **argv)
-{   
+{
 	int                       ch;
 	int                       listenfd;
 	int                       serv_port=0;
@@ -117,7 +114,6 @@ int main(int argc,char **argv)
 				return 0;
 		}
 	}
-
 	if( !serv_port )
 	{
 		print_help(argv[0]);
@@ -141,6 +137,7 @@ int main(int argc,char **argv)
 		printf("epoll_create() failure: %s\n", strerror(errno));
 		return -3;
 	}
+	printf("epoll_create() successfully!\n");
 	event.events = EPOLLIN;
 	event.data.fd = listenfd;
 
@@ -150,9 +147,10 @@ int main(int argc,char **argv)
 		return -4;
 	}
 
-	
-	for( ; ;) 
+
+	for( ; ;)
 	{
+		printf("start to wait\n");
 		events=epoll_wait(epollfd,event_array,MAX_EVENTS,-1);
 		if( events<0 )
 		{
@@ -169,7 +167,7 @@ int main(int argc,char **argv)
 			if ( (event_array[i].events&EPOLLERR) || (event_array[i].events&EPOLLHUP) )/*错误退出*/
 			{
 				printf("epoll_wait get error on fd[%d]:%s\n",event_array[i].data.fd,strerror(errno));
-				
+
 				epoll_ctl(epollfd, EPOLL_CTL_DEL,event_array[i].data.fd,NULL);;
 				close(event_array[i].data.fd);
 			}
@@ -201,9 +199,13 @@ int main(int argc,char **argv)
 					close(event_array[i].data.fd);
 					continue;
 				}
+
 				else
 				{
 					printf("socket[%d] read get %d bytes data\n", event_array[i].data.fd, rv);
+					close(event_array[i].data.fd);
+					epoll_ctl(epollfd, EPOLL_CTL_DEL, event_array[i].data.fd, NULL);
+
 				}
 			}
 		}
@@ -212,8 +214,4 @@ cleanup:
 	close(listenfd);
 	return 0;
 }
-
-
-
-	
 
